@@ -1,0 +1,16 @@
+# Les images restent dans Google Drive, jamais dans Git.
+data/
+*.tif
+*.tiff
+*.zip
+
+# Identifiants
+*.json.key
+credentials*
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.ipynb_checkpoints/

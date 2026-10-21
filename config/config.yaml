@@ -1,0 +1,41 @@
+# Configuration des exports Sentinel-2.
+# Modifier ce fichier plutôt que le code : zones, périodes, indices, dossier Drive.
+
+gee:
+  # Identifiant du projet Google Cloud enregistré pour Earth Engine (usage non commercial).
+  project: "degration-vegetables"
+
+export:
+  # Nom du dossier créé dans le Google Drive du compte qui lance les exports.
+  drive_folder: "vegetation_sentiers"
+  # Système de coordonnées demandé par les encadrants. EPSG:2154 (Lambert-93) si l'on veut des mesures en mètres.
+  crs: "EPSG:4326"
+  # Taille de pixel en mètres (10 m = résolution native de Sentinel-2 pour B2, B3, B4, B8).
+  scale: 10
+  # Bandes exportées : indices (NDVI, GNDVI, BSI) et/ou réflectances brutes (B2, B3, B4, B8, B11).
+  bands: ["NDVI", "GNDVI", "BSI"]
+
+sentinel2:
+  # Images écartées si leur couverture nuageuse dépasse ce pourcentage (avant masquage pixel par pixel).
+  max_cloud_percent: 40
+
+# Années et saisons : on compare la même saison d'une année à l'autre.
+# Les dates sont au format MM-JJ ; "end" est exclue.
+years: [2019, 2020, 2021, 2022, 2023, 2024, 2025]
+seasons:
+  printemps: {start: "04-01", end: "06-01"}
+  ete: {start: "06-15", end: "09-01"}
+
+# Zones d'étude. Chaque zone a soit "kml" (polygone exporté de Google My Maps, .kml ou .kmz),
+# soit "bbox" [ouest, sud, est, nord] en degrés.
+# Les emprises ci-dessous sont APPROXIMATIVES : à remplacer par vos polygones.
+zones:
+  fontainebleau:
+    bbox: [2.55, 48.33, 2.80, 48.48]
+  calanques:
+    bbox: [5.36, 43.19, 5.55, 43.23]
+  ventoux:
+    bbox: [5.17, 44.13, 5.37, 44.22]
+  # exemple avec un polygone My Maps :
+  # sugiton:
+  #   kml: "zones/sugiton.kml"
