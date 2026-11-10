@@ -3,7 +3,7 @@
 
 gee:
   # Identifiant du projet Google Cloud enregistré pour Earth Engine (usage non commercial).
-  project: "degration-vegetables"
+  project: "degradation-vegetables"
 
 export:
   # Nom du dossier créé dans le Google Drive du compte qui lance les exports.
@@ -33,7 +33,7 @@ zones:
   fontainebleau:
     bbox: [2.55, 48.33, 2.80, 48.48]
   calanques:
-    bbox: [5.36, 43.19, 5.55, 43.23]
+    bbox: [5.36, 43.19, 5.55, 43.25]
   ventoux:
     bbox: [5.17, 44.13, 5.37, 44.22]
   # exemple avec un polygone My Maps :

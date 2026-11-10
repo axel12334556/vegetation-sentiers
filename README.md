@@ -74,6 +74,27 @@ Avec les trois emprises par défaut, 7 années et 2 saisons : 42 exports, enviro
 - **Nuages** : le masque utilise la classification SCL de Sentinel-2 (nuages, ombres, cirrus). Une période sans image exploitable est signalée et ignorée.
 - **Surfaces** : en EPSG:4326 les pixels sont en degrés ; pour mesurer des surfaces en mètres, utiliser EPSG:2154 (Lambert-93).
 
+## Carnet d'analyses (`notebooks/carnet_analyses.ipynb`)
+
+Le carnet rassemble les analyses présentées au tuteur et aux pairs, dans une trame identique pour chacune : question, données, méthode, figure, tableau, interprétation.
+
+| Section | Contenu |
+|---|---|
+| 0. Préparation | Paramètres (zones, sentiers, zones exclues, années), connexion Earth Engine |
+| 1. Données | Nombre d'images Sentinel-2 utilisables par zone et par été |
+| 2. Analyse 1 | État du NDVI de l'été de référence, cartes et statistiques |
+| 3. Analyse 2 | Évolution du NDVI entre deux étés, part des pixels en baisse ou perturbés |
+| 4. Analyse 3 | Végétation selon la distance aux sentiers : état et évolution, bande sentier contre bande témoin |
+| 5. Analyse 4 | Indice de sol nu (BSI) : les sentiers sont-ils visibles à 10 m ? |
+| 6–7. | Synthèse, conclusion, limites, contributions |
+
+- **Lancer** : ouvrir dans Colab, renseigner `DEPOT` dans la première cellule, puis Exécution › Tout exécuter. Les zones viennent de `config/config.yaml`, les autres réglages de la cellule « Paramètres ».
+- **Ajouter une zone de sentiers** : importer les sentiers en asset Earth Engine, puis renseigner son chemin dans `SENTIERS`.
+- **Exclure une zone perturbée** (incendie, repousse) : déposer un polygone `.kml` dans `zones/` et le renseigner dans `EXCLUSIONS`.
+- **Sorties** : figures dans `figures/`, tableaux CSV dans `resultats/`, réutilisables dans le diaporama et le rapport.
+- **Rédaction** : les cellules « Interprétation » sont à écrire par l'équipe, avec le nom de l'auteur.
+- **Partager** : enregistrer le carnet exécuté (avec ses sorties) dans le dépôt ; GitHub l'affiche avec les cartes et graphiques. Fichier › Télécharger › PDF pour l'envoyer avec le rapport.
+
 ## Organisation du dépôt
 
 ```
@@ -84,6 +105,8 @@ src/status.py          suivi des exports
 src/sentinel2.py       composite et indices (côté Earth Engine)
 src/config.py          lecture de la config, liste des exports, estimation du volume
 src/kml.py             lecture des polygones My Maps
-notebooks/             notebook Colab
+src/analyses.py        analyses du carnet (composites, évolution, profils sentiers, cartes)
+notebooks/             notebook Colab des exports et carnet d'analyses
+figures/, resultats/   sorties du carnet (créés à la première exécution)
 tests/                 tests hors ligne
 ```
