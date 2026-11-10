@@ -85,7 +85,7 @@ Le carnet rassemble les analyses présentées au tuteur et aux pairs, dans une t
 | 2. Analyse 1 | État du NDVI de l'été de référence, cartes et statistiques |
 | 3. Analyse 2 | Évolution du NDVI entre deux étés, part des pixels en baisse ou perturbés |
 | 4. Analyse 3 | Végétation selon la distance aux sentiers : état et évolution, bande sentier contre bande témoin |
-| 5. Analyse 4 | Indice de sol nu (BSI) : les sentiers sont-ils visibles à 10 m ? |
+| 5. Analyse 4 | Indice de sol nu (BSI) et dix plans rapprochés (couleurs naturelles, BSI) : les sentiers sont-ils visibles à 10 m ? |
 | 6–7. | Synthèse, conclusion, limites, contributions |
 
 - **Lancer** : ouvrir dans Colab, renseigner `DEPOT` dans la première cellule, puis Exécution › Tout exécuter. Les zones viennent de `config/config.yaml`, les autres réglages de la cellule « Paramètres ».

@@ -23,10 +23,15 @@ ETE = ("06-15", "09-01")  # du 15 juin au 31 août (fin exclue)
 # Tout le reste (nuages, ombres, eau, neige) est masqué.
 SCL_GARDEES = (4, 5)
 
+# Pour les images en couleurs naturelles, on garde la ville, l'eau, les routes : on ne masque
+# que les ombres (3), les nuages (8, 9, 10) et la neige (11).
+SCL_RGB_MASQUEES = (3, 8, 9, 10, 11)
+
 # Palettes (accessibles aux daltoniens) et bornes d'affichage.
 VIS_NDVI = {"min": 0.0, "max": 0.8, "palette": ["#ffffe5", "#d9f0a3", "#78c679", "#238443", "#004529"]}
 VIS_EVOLUTION = {"min": -0.2, "max": 0.2, "palette": ["#8c510a", "#d8b365", "#f5f5f5", "#5ab4ac", "#01665e"]}
 VIS_BSI = {"min": -0.3, "max": 0.2, "palette": ["#fff7ec", "#fdd49e", "#fc8d59", "#d7301f", "#7f0000"]}
+VIS_RGB = {"bands": ["B4", "B3", "B2"], "min": 0, "max": 3000, "gamma": 1.2}  # couleurs naturelles
 
 
 # --------------------------------------------------------------------------- géométries
@@ -81,6 +86,29 @@ def collection_saison(region: ee.Geometry, annee: int, saison=ETE, max_nuages: f
 def composite_saison(region: ee.Geometry, annee: int, saison=ETE, max_nuages: float = 40) -> ee.Image:
     """Médiane des indices NDVI, GNDVI et BSI sur la saison, découpée sur la zone."""
     return collection_saison(region, annee, saison, max_nuages).median().clip(region)
+
+
+def composite_rgb(region: ee.Geometry, annee: int, saison=ETE, max_nuages: float = 40) -> ee.Image:
+    """Médiane des bandes rouge, verte, bleue sur la saison (couleurs naturelles, nuages et ombres masqués)."""
+    debut, fin = saison
+
+    def masque(img):
+        scl = img.select("SCL")
+        nuageux = scl.eq(SCL_RGB_MASQUEES[0])
+        for valeur in SCL_RGB_MASQUEES[1:]:
+            nuageux = nuageux.Or(scl.eq(valeur))
+        return img.updateMask(nuageux.Not())
+
+    return (
+        ee.ImageCollection(COLLECTION)
+        .filterBounds(region)
+        .filterDate(f"{annee}-{debut}", f"{annee}-{fin}")
+        .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", max_nuages))
+        .map(masque)
+        .select(["B4", "B3", "B2"])
+        .median()
+        .clip(region)
+    )
 
 
 def evolution(region: ee.Geometry, annee_avant: int, annee_apres: int, bande: str = "NDVI",
@@ -188,6 +216,102 @@ def sentier_vs_temoin(image: ee.Image, bande: str, distance: ee.Image, region: e
         "temoin_pixels": d["temoin"].get(f"{bande}_count"),
         "ecart_sentier_moins_temoin": None if p_moy is None or t_moy is None else p_moy - t_moy,
     }
+
+
+# --------------------------------------------------------------------------- plans rapprochés
+
+def _sommets(coordonnees) -> list[tuple[float, float]]:
+    """Aplatit les coordonnées d'une géométrie GeoJSON (ligne ou multi-ligne) en liste de (lon, lat)."""
+    if coordonnees and isinstance(coordonnees[0], (int, float)):
+        return [(coordonnees[0], coordonnees[1])]
+    sommets: list[tuple[float, float]] = []
+    for element in coordonnees:
+        sommets.extend(_sommets(element))
+    return sommets
+
+
+def milieu(geometrie: dict) -> tuple[float, float] | None:
+    """Sommet central d'une ligne : il est toujours sur le sentier (le centroïde, lui, peut en sortir)."""
+    sommets = _sommets(geometrie.get("coordinates", [])) if geometrie else []
+    return sommets[len(sommets) // 2] if sommets else None
+
+
+def distance_m(a: tuple[float, float], b: tuple[float, float]) -> float:
+    """Distance approchée en mètres entre deux points (lon, lat), suffisante à l'échelle de quelques km."""
+    k = 111_320.0
+    dx = (a[0] - b[0]) * k * np.cos(np.radians((a[1] + b[1]) / 2))
+    dy = (a[1] - b[1]) * k
+    return float(np.hypot(dx, dy))
+
+
+def espacer(points: list[tuple[float, float]], n: int, ecart_min: float) -> list[tuple[float, float]]:
+    """Garde au plus n points, dans l'ordre donné, séparés d'au moins ecart_min mètres."""
+    retenus: list[tuple[float, float]] = []
+    for p in points:
+        if all(distance_m(p, q) >= ecart_min for q in retenus):
+            retenus.append(p)
+        if len(retenus) == n:
+            break
+    return retenus
+
+
+def choisir_plans(sentiers: ee.FeatureCollection, region: ee.Geometry, n: int = 10, longueur_min: float = 300,
+                  ecart_min: float = 800, graine: int = 7, exclusion: ee.Geometry | None = None) -> pd.DataFrame:
+    """Tire n sites au hasard sur les sentiers (graine fixe : mêmes sites à chaque exécution).
+
+    Seuls les sentiers de plus de longueur_min mètres sont retenus, hors zone exclue, et les sites
+    sont espacés d'au moins ecart_min mètres pour ne pas montrer dix fois le même endroit.
+    """
+    candidats = (
+        sentiers.filterBounds(region)
+        .map(lambda f: f.set("longueur", f.geometry().length(1)))
+        .filter(ee.Filter.gte("longueur", longueur_min))
+    )
+    if exclusion is not None:
+        candidats = candidats.filter(ee.Filter.bounds(exclusion).Not())
+    tirage = candidats.randomColumn("alea", graine).sort("alea").limit(max(10 * n, 100)).getInfo()["features"]
+
+    points, longueurs = [], {}
+    for f in tirage:
+        p = milieu(f.get("geometry"))
+        if p is not None:
+            points.append(p)
+            longueurs[p] = f["properties"].get("longueur")
+    retenus = espacer(points, n, ecart_min)
+    return pd.DataFrame(
+        {"plan": range(1, len(retenus) + 1),
+         "lon": [p[0] for p in retenus], "lat": [p[1] for p in retenus],
+         "longueur_sentier_m": [round(longueurs[p]) for p in retenus]}
+    )
+
+
+def fenetre(lon: float, lat: float, demi_cote: float = 300) -> ee.Geometry:
+    """Carré de côté 2 x demi_cote mètres centré sur un point."""
+    return ee.Geometry.Point([lon, lat]).buffer(demi_cote).bounds()
+
+
+def planches_sentiers(sites: pd.DataFrame, image: ee.Image, vis: dict, sentiers: ee.FeatureCollection,
+                      demi_cote: float = 300, dimensions: int = 480, titre: str | None = None):
+    """Une paire de vignettes par site : l'image seule, puis l'image avec le sentier OpenStreetMap.
+
+    Deux sites par ligne. La version sans sentier sert à juger si le sentier se voit réellement.
+    """
+    lignes = (len(sites) + 1) // 2
+    fig, axes = plt.subplots(lignes, 4, figsize=(16, 4.1 * lignes), squeeze=False)
+    for ax in axes.ravel():
+        ax.axis("off")
+    for i, site in enumerate(sites.itertuples()):
+        zone = fenetre(site.lon, site.lat, demi_cote)
+        ligne, col = divmod(i, 2)
+        ax_seul, ax_avec = axes[ligne, 2 * col], axes[ligne, 2 * col + 1]
+        ax_seul.imshow(vignette(image, vis, zone, dimensions))
+        ax_seul.set_title(f"{site.plan} · {site.lat:.4f} N, {site.lon:.4f} E", fontsize=9)
+        ax_avec.imshow(vignette(image, vis, zone, dimensions, sentiers))
+        ax_avec.set_title(f"{site.plan} · avec le sentier OSM", fontsize=9)
+    if titre:
+        fig.suptitle(f"{titre} (fenêtres de {2 * demi_cote:.0f} m de côté)", y=1.0)
+    fig.tight_layout()
+    return fig
 
 
 # --------------------------------------------------------------------------- figures
