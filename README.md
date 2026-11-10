@@ -84,7 +84,7 @@ Le carnet rassemble les analyses présentées au tuteur et aux pairs, dans une t
 | 1. Données | Nombre d'images Sentinel-2 utilisables par zone et par été |
 | 2. Analyse 1 | État du NDVI de l'été de référence, cartes et statistiques |
 | 3. Analyse 2 | Évolution du NDVI entre deux étés, part des pixels en baisse ou perturbés |
-| 4. Analyse 3 | Végétation selon la distance aux sentiers : état et évolution, bande sentier contre bande témoin |
+| 4. Analyse 3 | Végétation selon la distance aux sentiers : état et évolution, bande sentier contre bande témoin, puis robustesse (part de forte baisse, écart par tronçon avec intervalle de confiance) |
 | 5. Analyse 4 | Indice de sol nu (BSI) et dix plans rapprochés (couleurs naturelles, BSI) : les sentiers sont-ils visibles à 10 m ? |
 | 6–7. | Synthèse, conclusion, limites, contributions |
 

@@ -2,7 +2,9 @@
 
 import unittest
 
-from src.analyses import VIS_BSI, VIS_EVOLUTION, VIS_NDVI, VIS_RGB, distance_m, espacer, groupes_vers_tableau, milieu
+import pandas as pd
+
+from src.analyses import VIS_BSI, VIS_EVOLUTION, VIS_NDVI, VIS_RGB, distance_m, espacer, groupes_vers_tableau, milieu, resumer_troncons
 
 
 class TestProfils(unittest.TestCase):
@@ -54,6 +56,36 @@ class TestPlans(unittest.TestCase):
         retenus = espacer(points, n=3, ecart_min=800)
         self.assertEqual(retenus, [(5.0, 43.0), (5.02, 43.0), (5.04, 43.0)])
         self.assertEqual(len(espacer(points, n=2, ecart_min=800)), 2)
+
+
+def _troncons(proche, temoin, pixels=20):
+    return pd.DataFrame({"proche": proche, "temoin": temoin,
+                         "pixels_proche": [pixels] * len(proche), "pixels_temoin": [pixels] * len(proche)})
+
+
+class TestRobustesse(unittest.TestCase):
+    def test_ecart_constant_distingue_de_zero(self):
+        # tous les tronçons sont 0,01 sous leur témoin : l'intervalle exclut 0
+        r = resumer_troncons(_troncons([0.50, 0.60, 0.40, 0.55], [0.51, 0.61, 0.41, 0.56]), n_boot=500)
+        self.assertAlmostEqual(r["ecart_moyen"], -0.01)
+        self.assertTrue(r["distingue_de_zero"])
+        self.assertEqual(r["part_troncons_sous_temoin"], 1.0)
+
+    def test_ecarts_de_signes_opposes_pas_distingues(self):
+        r = resumer_troncons(_troncons([0.52, 0.48, 0.52, 0.48, 0.52, 0.48], [0.50] * 6), n_boot=500)
+        self.assertAlmostEqual(r["ecart_moyen"], 0.0)
+        self.assertFalse(r["distingue_de_zero"])
+        self.assertEqual(r["part_troncons_sous_temoin"], 0.5)
+
+    def test_filtre_pixels_et_valeurs_manquantes(self):
+        df = _troncons([0.5, None, 0.5, 0.5], [0.4, 0.4, 0.4, 0.4])
+        df.loc[2, "pixels_proche"] = 1          # trop peu de pixels
+        r = resumer_troncons(df, pixels_min=3, n_boot=100)
+        self.assertEqual(r["n_troncons"], 2)
+
+    def test_trop_peu_de_troncons(self):
+        r = resumer_troncons(_troncons([0.5], [0.4]))
+        self.assertIsNone(r["ecart_moyen"])
 
 
 if __name__ == "__main__":

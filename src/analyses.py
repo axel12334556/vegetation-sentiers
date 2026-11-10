@@ -218,6 +218,101 @@ def sentier_vs_temoin(image: ee.Image, bande: str, distance: ee.Image, region: e
     }
 
 
+# --------------------------------------------------------------------------- robustesse
+
+def part_baisse_sentier_temoin(diff: ee.Image, distance: ee.Image, region: ee.Geometry, seuil: float = -0.1,
+                               proche: float = 15, temoin: tuple[float, float] = (50, 100)) -> dict:
+    """Part des pixels en forte baisse (évolution < seuil) près des sentiers et dans la bande témoin.
+
+    Le rapport proche / témoin vaut 1 si les sentiers n'ont pas plus de pixels en forte baisse que le témoin,
+    plus de 1 s'ils en ont davantage.
+    """
+    baisse = diff.lt(seuil).rename("baisse")
+    r = sentier_vs_temoin(baisse, "baisse", distance, region, proche, temoin)
+    p, t = r["sentier_moyenne"], r["temoin_moyenne"]
+    return {
+        "part_baisse_sentier": p,
+        "part_baisse_temoin": t,
+        "rapport_sentier_sur_temoin": None if not p or not t else p / t,
+        "pixels_sentier": r["sentier_pixels"],
+        "pixels_temoin": r["temoin_pixels"],
+    }
+
+
+def ecarts_par_troncon(image: ee.Image, bande: str, sentiers: ee.FeatureCollection, distance: ee.Image,
+                       region: ee.Geometry, n: int = 400, longueur_min: float = 100, proche: float = 15,
+                       temoin: tuple[float, float] = (50, 100), graine: int = 7,
+                       exclusion: ee.Geometry | None = None, scale: int = 10) -> pd.DataFrame:
+    """Pour n tronçons tirés au hasard : valeur moyenne près du tronçon et dans son voisinage témoin.
+
+    Le témoin est pris autour du même tronçon (pixels à 50-100 m de tout sentier, donc pas contaminés par
+    un autre sentier) : sentier et témoin partagent le même contexte local (altitude, exposition, sol).
+    """
+    img = image.select(bande)
+    bandes = ee.Image.cat([
+        img.updateMask(distance.lte(proche)).rename("proche"),
+        img.updateMask(distance.gt(temoin[0]).And(distance.lte(temoin[1]))).rename("temoin"),
+    ])
+
+    def secteur(f):
+        c = f.geometry().centroid(1).coordinates()
+        return ee.Feature(f.geometry().buffer(temoin[1], 5), {
+            "longueur": f.get("longueur"), "lon": c.get(0), "lat": c.get(1)})
+
+    tirage = _troncons_longs(sentiers, region, longueur_min, exclusion).randomColumn("alea", graine).sort("alea").limit(n)
+    reducer = ee.Reducer.mean().combine(ee.Reducer.count(), sharedInputs=True)
+    res = bandes.reduceRegions(collection=tirage.map(secteur), reducer=reducer, scale=scale, tileScale=4)
+    cols = ["longueur", "lon", "lat", "proche_mean", "proche_count", "temoin_mean", "temoin_count"]
+    donnees = res.select(cols, retainGeometry=False).getInfo()["features"]
+    df = pd.DataFrame([f["properties"] for f in donnees], columns=cols)
+    return df.rename(columns={"proche_mean": "proche", "temoin_mean": "temoin",
+                              "proche_count": "pixels_proche", "temoin_count": "pixels_temoin"})
+
+
+def resumer_troncons(df: pd.DataFrame, pixels_min: int = 3, n_boot: int = 5000, graine: int = 0) -> dict:
+    """Écart moyen sentier - témoin sur les tronçons, avec intervalle de confiance à 95 % par bootstrap.
+
+    Le bootstrap rééchantillonne les tronçons (et non les pixels, qui se ressemblent entre voisins) :
+    il mesure donc l'incertitude due au choix des tronçons. Si l'intervalle contient 0, l'écart
+    ne se distingue pas du bruit.
+    """
+    d = df.dropna(subset=["proche", "temoin"])
+    d = d[(d["pixels_proche"] >= pixels_min) & (d["pixels_temoin"] >= pixels_min)]
+    ecarts = (d["proche"] - d["temoin"]).to_numpy(dtype=float)
+    if len(ecarts) < 2:
+        return {"n_troncons": int(len(ecarts)), "ecart_moyen": None, "ic95_bas": None, "ic95_haut": None,
+                "part_troncons_sous_temoin": None, "distingue_de_zero": None}
+    rng = np.random.default_rng(graine)
+    moyennes = rng.choice(ecarts, size=(n_boot, len(ecarts)), replace=True).mean(axis=1)
+    bas, haut = np.percentile(moyennes, [2.5, 97.5])
+    return {
+        "n_troncons": int(len(ecarts)),
+        "ecart_moyen": float(ecarts.mean()),
+        "ic95_bas": float(bas),
+        "ic95_haut": float(haut),
+        "part_troncons_sous_temoin": float((ecarts < 0).mean()),
+        "distingue_de_zero": bool(bas > 0 or haut < 0),
+    }
+
+
+def tracer_intervalles(tableau: pd.DataFrame, titre: str, xlabel: str, ax=None):
+    """Écart moyen et intervalle à 95 % par zone (colonnes : zone, ecart_moyen, ic95_bas, ic95_haut)."""
+    if ax is None:
+        _, ax = plt.subplots(figsize=(7, 0.9 * len(tableau) + 1.5))
+    y = np.arange(len(tableau))
+    x = tableau["ecart_moyen"].to_numpy(dtype=float)
+    ax.errorbar(x, y, xerr=[x - tableau["ic95_bas"].to_numpy(dtype=float),
+                            tableau["ic95_haut"].to_numpy(dtype=float) - x],
+                fmt="o", color="#2c7fb8", ecolor="#2c7fb8", capsize=4)
+    ax.axvline(0, color="#999999", linewidth=0.9)
+    ax.set_yticks(y, tableau["zone"])
+    ax.invert_yaxis()
+    ax.set_xlabel(xlabel)
+    ax.set_title(titre)
+    ax.grid(axis="x", alpha=0.3)
+    return ax
+
+
 # --------------------------------------------------------------------------- plans rapprochés
 
 def _sommets(coordonnees) -> list[tuple[float, float]]:
@@ -255,13 +350,9 @@ def espacer(points: list[tuple[float, float]], n: int, ecart_min: float) -> list
     return retenus
 
 
-def choisir_plans(sentiers: ee.FeatureCollection, region: ee.Geometry, n: int = 10, longueur_min: float = 300,
-                  ecart_min: float = 800, graine: int = 7, exclusion: ee.Geometry | None = None) -> pd.DataFrame:
-    """Tire n sites au hasard sur les sentiers (graine fixe : mêmes sites à chaque exécution).
-
-    Seuls les sentiers de plus de longueur_min mètres sont retenus, hors zone exclue, et les sites
-    sont espacés d'au moins ecart_min mètres pour ne pas montrer dix fois le même endroit.
-    """
+def _troncons_longs(sentiers: ee.FeatureCollection, region: ee.Geometry, longueur_min: float,
+                    exclusion: ee.Geometry | None = None) -> ee.FeatureCollection:
+    """Tronçons de sentier plus longs que longueur_min (m), avec leur longueur, hors zone exclue."""
     candidats = (
         sentiers.filterBounds(region)
         .map(lambda f: f.set("longueur", f.geometry().length(1)))
@@ -269,6 +360,17 @@ def choisir_plans(sentiers: ee.FeatureCollection, region: ee.Geometry, n: int = 
     )
     if exclusion is not None:
         candidats = candidats.filter(ee.Filter.bounds(exclusion).Not())
+    return candidats
+
+
+def choisir_plans(sentiers: ee.FeatureCollection, region: ee.Geometry, n: int = 10, longueur_min: float = 300,
+                  ecart_min: float = 800, graine: int = 7, exclusion: ee.Geometry | None = None) -> pd.DataFrame:
+    """Tire n sites au hasard sur les sentiers (graine fixe : mêmes sites à chaque exécution).
+
+    Seuls les sentiers de plus de longueur_min mètres sont retenus, hors zone exclue, et les sites
+    sont espacés d'au moins ecart_min mètres pour ne pas montrer dix fois le même endroit.
+    """
+    candidats = _troncons_longs(sentiers, region, longueur_min, exclusion)
     tirage = candidats.randomColumn("alea", graine).sort("alea").limit(max(10 * n, 100)).getInfo()["features"]
 
     points, longueurs = [], {}
