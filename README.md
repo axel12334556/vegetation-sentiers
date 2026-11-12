@@ -90,6 +90,7 @@ Le carnet rassemble les analyses présentées au tuteur et aux pairs, dans une t
 
 - **Lancer** : ouvrir dans Colab, renseigner `DEPOT` dans la première cellule, puis Exécution › Tout exécuter. Les zones viennent de `config/config.yaml`, les autres réglages de la cellule « Paramètres ».
 - **Ajouter une zone de sentiers** : importer les sentiers en asset Earth Engine, puis renseigner son chemin dans `SENTIERS`.
+- **Nuages et occupation du sol** : `MAX_NUAGES` (80 % par défaut) règle le tri des images avant le masque pixel par pixel ; `OCCUPATION_GARDEE` garde seulement forêt, arbustes et prairie (ESA WorldCover) dans les indices, pour retirer champs, bâti et eau.
 - **Exclure une zone perturbée** (incendie, repousse) : déposer un polygone `.kml` dans `zones/` et le renseigner dans `EXCLUSIONS`.
 - **Sorties** : figures dans `figures/`, tableaux CSV dans `resultats/`, réutilisables dans le diaporama et le rapport.
 - **Rédaction** : les cellules « Interprétation » sont à écrire par l'équipe, avec le nom de l'auteur.

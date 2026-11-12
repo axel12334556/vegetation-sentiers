@@ -23,6 +23,18 @@ ETE = ("06-15", "09-01")  # du 15 juin au 31 août (fin exclue)
 # Tout le reste (nuages, ombres, eau, neige) est masqué.
 SCL_GARDEES = (4, 5)
 
+# Réglages modifiables depuis le carnet (A.MAX_NUAGES = ..., A.OCCUPATION_GARDEE = ...).
+# MAX_NUAGES : une image est écartée si plus de ce pourcentage de sa tuile est nuageux. Le masque SCL
+# retire ensuite les nuages pixel par pixel ; un seuil élevé garde donc plus d'images sans gâter le composite.
+MAX_NUAGES = 40
+# OCCUPATION_GARDEE : classes ESA WorldCover conservées dans les indices (None = pas de masque).
+OCCUPATION_GARDEE: tuple[int, ...] | None = None
+WORLDCOVER = "ESA/WorldCover/v200"
+CLASSES_WORLDCOVER = {
+    10: "forêt", 20: "arbustes", 30: "prairie", 40: "cultures", 50: "bâti", 60: "sol nu ou clairsemé",
+    70: "neige", 80: "eau", 90: "zone humide", 95: "mangrove", 100: "mousses et lichens",
+}
+
 # Pour les images en couleurs naturelles, on garde la ville, l'eau, les routes : on ne masque
 # que les ombres (3), les nuages (8, 9, 10) et la neige (11).
 SCL_RGB_MASQUEES = (3, 8, 9, 10, 11)
@@ -71,24 +83,66 @@ def _indices(img: ee.Image) -> ee.Image:
     return ee.Image.cat([ndvi, gndvi, bsi])
 
 
-def collection_saison(region: ee.Geometry, annee: int, saison=ETE, max_nuages: float = 40) -> ee.ImageCollection:
+def _seuil_nuages(max_nuages: float | None) -> float:
+    return MAX_NUAGES if max_nuages is None else max_nuages
+
+
+def masque_occupation(classes) -> ee.Image:
+    """1 sur les pixels dont la classe WorldCover (2021, 10 m) est dans classes, masqué ailleurs."""
+    carte = ee.ImageCollection(WORLDCOVER).first().select("Map")
+    garde = carte.eq(classes[0])
+    for c in classes[1:]:
+        garde = garde.Or(carte.eq(c))
+    return garde.selfMask()
+
+
+def occupation_sol(regions: dict[str, ee.Geometry], scale: int = 10) -> pd.DataFrame:
+    """Part de chaque classe WorldCover dans chaque zone (lignes : zones, colonnes : classes)."""
+    carte = ee.ImageCollection(WORLDCOVER).first().select("Map")
+    requete = ee.Dictionary({
+        nom: carte.reduceRegion(ee.Reducer.frequencyHistogram(), reg, scale, maxPixels=int(1e10), tileScale=4).get("Map")
+        for nom, reg in regions.items()
+    }).getInfo()
+    return tableau_occupation(requete)
+
+
+def tableau_occupation(histogrammes: dict[str, dict]) -> pd.DataFrame:
+    """Convertit des histogrammes {zone: {classe: nombre de pixels}} en parts par classe nommée."""
+    lignes = {}
+    for nom, histo in histogrammes.items():
+        total = sum(histo.values()) or 1
+        lignes[nom] = {CLASSES_WORLDCOVER.get(int(float(k)), k): v / total for k, v in histo.items()}
+    ordre = [c for c in CLASSES_WORLDCOVER.values() if any(c in l for l in lignes.values())]
+    return pd.DataFrame(lignes).T.reindex(columns=ordre).fillna(0.0)
+
+
+def collection_saison(region: ee.Geometry, annee: int, saison=ETE, max_nuages: float | None = None) -> ee.ImageCollection:
     debut, fin = saison
     return (
         ee.ImageCollection(COLLECTION)
         .filterBounds(region)
         .filterDate(f"{annee}-{debut}", f"{annee}-{fin}")
-        .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", max_nuages))
+        .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", _seuil_nuages(max_nuages)))
         .map(_masque_scl)
         .map(_indices)
     )
 
 
-def composite_saison(region: ee.Geometry, annee: int, saison=ETE, max_nuages: float = 40) -> ee.Image:
-    """Médiane des indices NDVI, GNDVI et BSI sur la saison, découpée sur la zone."""
-    return collection_saison(region, annee, saison, max_nuages).median().clip(region)
+def composite_saison(region: ee.Geometry, annee: int, saison=ETE, max_nuages: float | None = None,
+                     avec_occupation: bool = True) -> ee.Image:
+    """Médiane des indices NDVI, GNDVI et BSI sur la saison, découpée sur la zone.
+
+    Si OCCUPATION_GARDEE est défini, seuls les pixels de ces classes WorldCover sont gardés
+    (par exemple forêt, arbustes, prairie : on retire champs, villes et eau).
+    avec_occupation=False ignore ce masque (utile pour voir les sentiers sur sol nu).
+    """
+    image = collection_saison(region, annee, saison, max_nuages).median().clip(region)
+    if avec_occupation and OCCUPATION_GARDEE:
+        image = image.updateMask(masque_occupation(OCCUPATION_GARDEE))
+    return image
 
 
-def composite_rgb(region: ee.Geometry, annee: int, saison=ETE, max_nuages: float = 40) -> ee.Image:
+def composite_rgb(region: ee.Geometry, annee: int, saison=ETE, max_nuages: float | None = None) -> ee.Image:
     """Médiane des bandes rouge, verte, bleue sur la saison (couleurs naturelles, nuages et ombres masqués)."""
     debut, fin = saison
 
@@ -103,7 +157,7 @@ def composite_rgb(region: ee.Geometry, annee: int, saison=ETE, max_nuages: float
         ee.ImageCollection(COLLECTION)
         .filterBounds(region)
         .filterDate(f"{annee}-{debut}", f"{annee}-{fin}")
-        .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", max_nuages))
+        .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", _seuil_nuages(max_nuages)))
         .map(masque)
         .select(["B4", "B3", "B2"])
         .median()
@@ -112,14 +166,14 @@ def composite_rgb(region: ee.Geometry, annee: int, saison=ETE, max_nuages: float
 
 
 def evolution(region: ee.Geometry, annee_avant: int, annee_apres: int, bande: str = "NDVI",
-              saison=ETE, max_nuages: float = 40) -> ee.Image:
+              saison=ETE, max_nuages: float | None = None) -> ee.Image:
     """Différence apres - avant d'un indice (négatif = baisse)."""
     avant = composite_saison(region, annee_avant, saison, max_nuages).select(bande)
     apres = composite_saison(region, annee_apres, saison, max_nuages).select(bande)
     return apres.subtract(avant).rename(f"d{bande}")
 
 
-def nombre_images(regions: dict[str, ee.Geometry], annees, saison=ETE, max_nuages: float = 40) -> pd.DataFrame:
+def nombre_images(regions: dict[str, ee.Geometry], annees, saison=ETE, max_nuages: float | None = None) -> pd.DataFrame:
     """Tableau zones x années du nombre d'images Sentinel-2 utilisables."""
     requete = ee.Dictionary({
         f"{nom}|{a}": collection_saison(reg, a, saison, max_nuages).size()

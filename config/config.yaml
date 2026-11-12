@@ -17,7 +17,8 @@ export:
 
 sentinel2:
   # Images écartées si leur couverture nuageuse dépasse ce pourcentage (avant masquage pixel par pixel).
-  max_cloud_percent: 40
+  # 80 : en Île-de-France, beaucoup de tuiles d'été dépassent 40 % ; le masque SCL retire ensuite les nuages.
+  max_cloud_percent: 80
 
 # Années et saisons : on compare la même saison d'une année à l'autre.
 # Les dates sont au format MM-JJ ; "end" est exclue.

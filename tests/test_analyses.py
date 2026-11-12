@@ -4,7 +4,7 @@ import unittest
 
 import pandas as pd
 
-from src.analyses import VIS_BSI, VIS_EVOLUTION, VIS_NDVI, VIS_RGB, distance_m, espacer, groupes_vers_tableau, milieu, resumer_troncons
+from src.analyses import VIS_BSI, VIS_EVOLUTION, VIS_NDVI, VIS_RGB, distance_m, espacer, groupes_vers_tableau, milieu, resumer_troncons, tableau_occupation
 
 
 class TestProfils(unittest.TestCase):
@@ -86,6 +86,16 @@ class TestRobustesse(unittest.TestCase):
     def test_trop_peu_de_troncons(self):
         r = resumer_troncons(_troncons([0.5], [0.4]))
         self.assertIsNone(r["ecart_moyen"])
+
+
+class TestOccupation(unittest.TestCase):
+    def test_parts_par_classe(self):
+        df = tableau_occupation({"z1": {"10": 75, "40": 25}, "z2": {"10.0": 50, "50": 50}})
+        self.assertAlmostEqual(df.loc["z1", "forêt"], 0.75)
+        self.assertAlmostEqual(df.loc["z1", "cultures"], 0.25)
+        self.assertAlmostEqual(df.loc["z1", "bâti"], 0.0)
+        self.assertAlmostEqual(df.loc["z2", "bâti"], 0.5)
+        self.assertEqual(list(df.columns), ["forêt", "cultures", "bâti"])
 
 
 if __name__ == "__main__":
